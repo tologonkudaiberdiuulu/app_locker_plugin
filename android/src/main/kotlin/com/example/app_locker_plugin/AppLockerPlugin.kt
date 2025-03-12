@@ -30,10 +30,26 @@ class AppLockerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     private lateinit var context: Context
     private var activityBinding: ActivityPluginBinding? = null
 
+    companion object {
+        private var instance: AppLockerPlugin? = null
+
+        fun getInstance(): AppLockerPlugin {
+            if (instance == null) {
+                instance = AppLockerPlugin()
+            }
+            return instance!!
+        }
+
+        fun invokeMethod(method: String, arguments: Any?) {
+            instance?.channel?.invokeMethod(method, arguments)
+        }
+    }
+
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         channel = MethodChannel(flutterPluginBinding.binaryMessenger, "app_locker_plugin")
         channel.setMethodCallHandler(this)
         context = flutterPluginBinding.applicationContext
+        instance = this
     }
 
     override fun onMethodCall(call: MethodCall, result: Result) {
@@ -108,7 +124,7 @@ class AppLockerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     private fun showOverlay(result: Result) {
         // Notify Flutter to show the overlay UI
         Handler(Looper.getMainLooper()).post {
-            channel.invokeMethod("showOverlay", null)
+            invokeMethod("showOverlay", null)
         }
         result.success(true)
     }
@@ -116,13 +132,14 @@ class AppLockerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     private fun hideOverlay(result: Result) {
         // Notify Flutter to hide the overlay UI
         Handler(Looper.getMainLooper()).post {
-            channel.invokeMethod("hideOverlay", null)
+            invokeMethod("hideOverlay", null)
         }
         result.success(true)
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         channel.setMethodCallHandler(null)
+        instance = null
     }
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
@@ -215,7 +232,7 @@ class AppLockService : Service() {
                     if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED && currentAppActivityList.isEmpty()) {
                         currentAppActivityList.add(event.className)
                         Handler(Looper.getMainLooper()).post {
-                            AppLockerPlugin().channel.invokeMethod("showOverlay", null)
+                            AppLockerPlugin.invokeMethod("showOverlay", null)
                         }
                     } else if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED) {
                         if (!currentAppActivityList.contains(event.className)) {
