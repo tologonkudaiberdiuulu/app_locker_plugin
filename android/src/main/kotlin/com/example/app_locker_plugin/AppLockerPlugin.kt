@@ -122,7 +122,6 @@ class AppLockerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     }
 
     private fun showOverlay(result: Result) {
-        // Notify Flutter to show the overlay UI
         Handler(Looper.getMainLooper()).post {
             invokeMethod("showOverlay", null)
         }
@@ -130,7 +129,6 @@ class AppLockerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     }
 
     private fun hideOverlay(result: Result) {
-        // Notify Flutter to hide the overlay UI
         Handler(Looper.getMainLooper()).post {
             invokeMethod("hideOverlay", null)
         }
@@ -171,21 +169,20 @@ class AppLockService : Service() {
     }
 
     override fun onCreate() {
-      super.onCreate()
-      val channelId = "AppLock-10"
-      val channel = android.app.NotificationChannel(
-          channelId,
-          "Channel human readable title",
-          android.app.NotificationManager.IMPORTANCE_DEFAULT
-      )
-      (getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager).createNotificationChannel(channel)
-      val notification = NotificationCompat.Builder(this, channelId)
-          .setContentTitle("App Locker Service")
-          .setContentText("Monitoring app usage")
-          .build()
-      // Ensure the foreground service type is correctly set
-      startForeground(1, notification)
-      startMyOwnForeground()
+        super.onCreate()
+        val channelId = "AppLock-10"
+        val channel = android.app.NotificationChannel(
+            channelId,
+            "Channel human readable title",
+            android.app.NotificationManager.IMPORTANCE_DEFAULT
+        )
+        (getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager).createNotificationChannel(channel)
+        val notification = NotificationCompat.Builder(this, channelId)
+            .setContentTitle("App Locker Service")
+            .setContentText("Monitoring app usage")
+            .build()
+        startForeground(1, notification)
+        startMyOwnForeground()
     }
 
     private fun startMyOwnForeground() {
@@ -252,7 +249,7 @@ class AppLockService : Service() {
 }
 
 class HomeWatcher(private val mContext: Context) {
-    private val mFilter: IntentFilter
+    private val mFilter: IntentFilter = IntentFilter(Intent.ACTION_CLOSE_SYSTEM_DIALOGS)
     private var mListener: OnHomePressedListener? = null
     private var mReceiver: InnerReceiver? = null
 
@@ -263,7 +260,8 @@ class HomeWatcher(private val mContext: Context) {
 
     fun startWatch() {
         if (mReceiver != null) {
-            mContext.registerReceiver(mReceiver, mFilter)
+            // Specify RECEIVER_NOT_EXPORTED for Android 14+ compatibility
+            mContext.registerReceiver(mReceiver, mFilter, Context.RECEIVER_NOT_EXPORTED)
         }
     }
 
@@ -299,17 +297,13 @@ class HomeWatcher(private val mContext: Context) {
             }
         }
     }
-
-    init {
-        mFilter = IntentFilter(Intent.ACTION_CLOSE_SYSTEM_DIALOGS)
-    }
 }
 
 class BootUpReceiver : BroadcastReceiver() {
-  override fun onReceive(context: Context, intent: Intent?) {
-      val saveAppData: SharedPreferences = context.getSharedPreferences("save_app_data", Context.MODE_PRIVATE)
-      if (saveAppData.getString("is_stopped", "1") == "0") {
-          ContextCompat.startForegroundService(context, Intent(context, AppLockService::class.java))
-      }
-  }
+    override fun onReceive(context: Context, intent: Intent?) {
+        val saveAppData: SharedPreferences = context.getSharedPreferences("save_app_data", Context.MODE_PRIVATE)
+        if (saveAppData.getString("is_stopped", "1") == "0") {
+            ContextCompat.startForegroundService(context, Intent(context, AppLockService::class.java))
+        }
+    }
 }
