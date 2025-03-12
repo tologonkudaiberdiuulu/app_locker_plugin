@@ -16,7 +16,8 @@
       android:icon="@mipmap/ic_launcher">
       <service
           android:name=".AppLockService"
-          android:exported="false"/>
+          android:exported="false"
+          android:foregroundServiceType="specialUse"/>
 
       <receiver
           android:name=".BootUpReceiver"

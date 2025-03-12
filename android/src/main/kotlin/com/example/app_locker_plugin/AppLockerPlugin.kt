@@ -171,19 +171,21 @@ class AppLockService : Service() {
     }
 
     override fun onCreate() {
-        super.onCreate()
-        val channelId = "AppLock-10"
-        val channel = android.app.NotificationChannel(
-            channelId,
-            "Channel human readable title",
-            android.app.NotificationManager.IMPORTANCE_DEFAULT
-        )
-        (getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager).createNotificationChannel(channel)
-        val notification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle("")
-            .setContentText("").build()
-        startForeground(1, notification)
-        startMyOwnForeground()
+      super.onCreate()
+      val channelId = "AppLock-10"
+      val channel = android.app.NotificationChannel(
+          channelId,
+          "Channel human readable title",
+          android.app.NotificationManager.IMPORTANCE_DEFAULT
+      )
+      (getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager).createNotificationChannel(channel)
+      val notification = NotificationCompat.Builder(this, channelId)
+          .setContentTitle("App Locker Service")
+          .setContentText("Monitoring app usage")
+          .build()
+      // Ensure the foreground service type is correctly set
+      startForeground(1, notification)
+      startMyOwnForeground()
     }
 
     private fun startMyOwnForeground() {
