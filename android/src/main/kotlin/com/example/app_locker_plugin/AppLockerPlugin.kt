@@ -306,10 +306,10 @@ class HomeWatcher(private val mContext: Context) {
 }
 
 class BootUpReceiver : BroadcastReceiver() {
-    override fun onReceive(context: Context, intent: Intent?) {
-        val saveAppData: SharedPreferences = context.getSharedPreferences("save_app_data", Context.MODE_PRIVATE)
-        if (saveAppData.getString("is_stopped", "1") == "0") {
-            ContextCompat.startForegroundService(context, Intent(context, AppLockService::class.java))
-        }
-    }
+  override fun onReceive(context: Context, intent: Intent?) {
+      val saveAppData: SharedPreferences = context.getSharedPreferences("save_app_data", Context.MODE_PRIVATE)
+      if (saveAppData.getString("is_stopped", "1") == "0") {
+          ContextCompat.startForegroundService(context, Intent(context, AppLockService::class.java))
+      }
+  }
 }
