@@ -17,13 +17,13 @@
       android:icon="@mipmap/ic_launcher">
       <service
           android:name=".AppLockService"
-          android:exported="false"
+          android:exported="true"
           android:foregroundServiceType="specialUse"/>
 
       <receiver
           android:name=".BootUpReceiver"
           android:enabled="true"
-          android:exported="false"
+          android:exported="true"
           android:permission="android.permission.RECEIVE_BOOT_COMPLETED">
           <intent-filter>
               <action android:name="android.intent.action.BOOT_COMPLETED"/>
