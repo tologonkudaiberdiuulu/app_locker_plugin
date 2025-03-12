@@ -43,9 +43,19 @@ class AppLockerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
 
         fun invokeMethod(method: String, arguments: Any?) {
             Log.d(TAG, "Invoking method: $method with args: $arguments")
-            instance?.channel?.invokeMethod(method, arguments) { result ->
-                Log.d(TAG, "Method $method result: $result")
-            }
+            instance?.channel?.invokeMethod(method, arguments, object : Result {
+                override fun success(result: Any?) {
+                    Log.d(TAG, "Method $method succeeded with result: $result")
+                }
+
+                override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
+                    Log.d(TAG, "Method $method failed with error: $errorCode, $errorMessage")
+                }
+
+                override fun notImplemented() {
+                    Log.d(TAG, "Method $method not implemented")
+                }
+            })
         }
     }
 
