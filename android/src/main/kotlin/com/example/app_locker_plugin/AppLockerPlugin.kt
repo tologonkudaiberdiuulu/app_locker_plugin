@@ -12,7 +12,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
-import android.view.WindowManager
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.engine.plugins.FlutterPlugin
@@ -32,6 +32,7 @@ class AppLockerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
 
     companion object {
         private var instance: AppLockerPlugin? = null
+        private const val TAG = "AppLockerPlugin"
 
         fun getInstance(): AppLockerPlugin {
             if (instance == null) {
@@ -41,7 +42,10 @@ class AppLockerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
         }
 
         fun invokeMethod(method: String, arguments: Any?) {
-            instance?.channel?.invokeMethod(method, arguments)
+            Log.d(TAG, "Invoking method: $method with args: $arguments")
+            instance?.channel?.invokeMethod(method, arguments) { result ->
+                Log.d(TAG, "Method $method result: $result")
+            }
         }
     }
 
@@ -50,6 +54,7 @@ class AppLockerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
         channel.setMethodCallHandler(this)
         context = flutterPluginBinding.applicationContext
         instance = this
+        Log.d(TAG, "Plugin attached to engine")
     }
 
     override fun onMethodCall(call: MethodCall, result: Result) {
@@ -71,8 +76,9 @@ class AppLockerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
         val saveAppData: SharedPreferences = context.getSharedPreferences("save_app_data", Context.MODE_PRIVATE)
         val editor = saveAppData.edit()
         editor.putString("app_data", appList.joinToString(","))
-        editor.putString("is_stopped", "0") // 0 means service is running
+        editor.putString("is_stopped", "0")
         editor.apply()
+        Log.d(TAG, "Starting service with app list: $appList")
 
         if (Settings.canDrawOverlays(context)) {
             ContextCompat.startForegroundService(context, Intent(context, AppLockService::class.java))
@@ -85,9 +91,10 @@ class AppLockerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     private fun stopService(result: Result) {
         val saveAppData: SharedPreferences = context.getSharedPreferences("save_app_data", Context.MODE_PRIVATE)
         val editor = saveAppData.edit()
-        editor.putString("is_stopped", "1") // 1 means service is stopped
+        editor.putString("is_stopped", "1")
         editor.apply()
         context.stopService(Intent(context, AppLockService::class.java))
+        Log.d(TAG, "Service stopped")
         result.success("Service stopped successfully")
     }
 
@@ -159,10 +166,10 @@ class AppLockerPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
 
 class AppLockService : Service() {
     private var timer: Timer = Timer()
-    private var isTimerStarted = false
     private var timerReload: Long = 500
-    private var currentAppActivityList = arrayListOf<String>()
-    private var homeWatcher = HomeWatcher(this)
+    private var lockedApps: List<String> = emptyList()
+    private val TAG = "AppLockService"
+    private var isOverlayVisible = false
 
     override fun onBind(intent: Intent): IBinder? {
         throw UnsupportedOperationException("")
@@ -173,7 +180,7 @@ class AppLockService : Service() {
         val channelId = "AppLock-10"
         val channel = android.app.NotificationChannel(
             channelId,
-            "Channel human readable title",
+            "App Lock Service",
             android.app.NotificationManager.IMPORTANCE_DEFAULT
         )
         (getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager).createNotificationChannel(channel)
@@ -182,120 +189,74 @@ class AppLockService : Service() {
             .setContentText("Monitoring app usage")
             .build()
         startForeground(1, notification)
-        startMyOwnForeground()
+        Log.d(TAG, "Service created and started as foreground")
+        loadLockedApps()
+        startMonitoring()
     }
 
-    private fun startMyOwnForeground() {
-        homeWatcher.setOnHomePressedListener(object : HomeWatcher.OnHomePressedListener {
-            override fun onHomePressed() {
-                currentAppActivityList.clear()
-            }
-
-            override fun onHomeLongPressed() {
-                currentAppActivityList.clear()
-            }
-        })
-        homeWatcher.startWatch()
-        timerRun()
+    private fun loadLockedApps() {
+        val saveAppData: SharedPreferences = applicationContext.getSharedPreferences("save_app_data", Context.MODE_PRIVATE)
+        lockedApps = saveAppData.getString("app_data", "")!!.split(",").filter { it.isNotEmpty() }
+        Log.d(TAG, "Loaded locked apps: $lockedApps")
     }
 
-    override fun onDestroy() {
-        timer.cancel()
-        homeWatcher.stopWatch()
-        super.onDestroy()
-    }
-
-    private fun timerRun() {
+    private fun startMonitoring() {
         timer.scheduleAtFixedRate(object : TimerTask() {
             override fun run() {
-                isTimerStarted = true
-                isServiceRunning()
+                checkForegroundApp()
             }
         }, 0, timerReload)
     }
 
-    private fun isServiceRunning() {
+    private fun checkForegroundApp() {
         val saveAppData: SharedPreferences = applicationContext.getSharedPreferences("save_app_data", Context.MODE_PRIVATE)
-        val lockedAppList: List<String> = saveAppData.getString("app_data", "")!!.split(",").filter { it.isNotEmpty() }
+        if (saveAppData.getString("is_stopped", "1") == "1") {
+            Log.d(TAG, "Service is stopped, skipping check")
+            return
+        }
 
         val mUsageStatsManager = getSystemService(USAGE_STATS_SERVICE) as UsageStatsManager
         val time = System.currentTimeMillis()
-
-        val usageEvents = mUsageStatsManager.queryEvents(time - timerReload, time)
+        val usageEvents = mUsageStatsManager.queryEvents(time - timerReload * 2, time)
         val event = UsageEvents.Event()
 
+        var foregroundApp: String? = null
         while (usageEvents.hasNextEvent()) {
             usageEvents.getNextEvent(event)
-            for (element in lockedAppList) {
-                if (event.packageName.toString().trim() == element.trim()) {
-                    if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED && currentAppActivityList.isEmpty()) {
-                        currentAppActivityList.add(event.className)
-                        Handler(Looper.getMainLooper()).post {
-                            AppLockerPlugin.invokeMethod("showOverlay", null)
-                        }
-                    } else if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED) {
-                        if (!currentAppActivityList.contains(event.className)) {
-                            currentAppActivityList.add(event.className)
-                        }
-                    } else if (event.eventType == UsageEvents.Event.ACTIVITY_STOPPED) {
-                        if (currentAppActivityList.contains(event.className)) {
-                            currentAppActivityList.remove(event.className)
-                        }
-                    }
-                }
+            if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED) {
+                foregroundApp = event.packageName
+                Log.d(TAG, "Activity resumed: $foregroundApp")
+            }
+        }
+
+        if (foregroundApp != null && lockedApps.contains(foregroundApp) && !isOverlayVisible) {
+            Log.d(TAG, "Locked app detected: $foregroundApp, showing overlay")
+            Handler(Looper.getMainLooper()).post {
+                AppLockerPlugin.invokeMethod("showOverlay", mapOf("packageName" to foregroundApp))
+                isOverlayVisible = true
+                forceHomeScreen() // Optional: Force back to home screen
+            }
+        } else if (foregroundApp != null && !lockedApps.contains(foregroundApp) && isOverlayVisible) {
+            Log.d(TAG, "Non-locked app in foreground: $foregroundApp, hiding overlay")
+            Handler(Looper.getMainLooper()).post {
+                AppLockerPlugin.invokeMethod("hideOverlay", null)
+                isOverlayVisible = false
             }
         }
     }
-}
 
-class HomeWatcher(private val mContext: Context) {
-    private val mFilter: IntentFilter = IntentFilter(Intent.ACTION_CLOSE_SYSTEM_DIALOGS)
-    private var mListener: OnHomePressedListener? = null
-    private var mReceiver: InnerReceiver? = null
-
-    fun setOnHomePressedListener(listener: OnHomePressedListener?) {
-        mListener = listener
-        mReceiver = InnerReceiver()
+    private fun forceHomeScreen() {
+        val homeIntent = Intent(Intent.ACTION_MAIN)
+        homeIntent.addCategory(Intent.CATEGORY_HOME)
+        homeIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        startActivity(homeIntent)
+        Log.d(TAG, "Forced back to home screen")
     }
 
-    fun startWatch() {
-        if (mReceiver != null) {
-            // Specify RECEIVER_NOT_EXPORTED for Android 14+ compatibility
-            mContext.registerReceiver(mReceiver, mFilter, Context.RECEIVER_NOT_EXPORTED)
-        }
-    }
-
-    fun stopWatch() {
-        if (mReceiver != null) {
-            mContext.unregisterReceiver(mReceiver)
-        }
-    }
-
-    interface OnHomePressedListener {
-        fun onHomePressed()
-        fun onHomeLongPressed()
-    }
-
-    inner class InnerReceiver : BroadcastReceiver() {
-        val SYSTEM_DIALOG_REASON_KEY = "reason"
-        val SYSTEM_DIALOG_REASON_RECENT_APPS = "recentapps"
-        val SYSTEM_DIALOG_REASON_HOME_KEY = "homekey"
-
-        override fun onReceive(context: Context, intent: Intent) {
-            val action = intent.action
-            if (action == Intent.ACTION_CLOSE_SYSTEM_DIALOGS) {
-                val reason = intent.getStringExtra(SYSTEM_DIALOG_REASON_KEY)
-                if (reason != null) {
-                    if (mListener != null) {
-                        if (reason == SYSTEM_DIALOG_REASON_HOME_KEY) {
-                            mListener!!.onHomePressed()
-                        } else if (reason == SYSTEM_DIALOG_REASON_RECENT_APPS) {
-                            mListener!!.onHomeLongPressed()
-                        }
-                    }
-                }
-            }
-        }
+    override fun onDestroy() {
+        timer.cancel()
+        Log.d(TAG, "Service destroyed")
+        super.onDestroy()
     }
 }
 
@@ -304,6 +265,7 @@ class BootUpReceiver : BroadcastReceiver() {
         val saveAppData: SharedPreferences = context.getSharedPreferences("save_app_data", Context.MODE_PRIVATE)
         if (saveAppData.getString("is_stopped", "1") == "0") {
             ContextCompat.startForegroundService(context, Intent(context, AppLockService::class.java))
+            Log.d("BootUpReceiver", "Service restarted after boot")
         }
     }
 }
